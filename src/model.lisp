@@ -7,6 +7,7 @@
   (:shadowing-import-from :iterate
                           :for)
   (:import-from :datafly.db
+                :add-inflate-table
                 :retrieve-one
                 :retrieve-all)
   (:import-from :datafly.cache
@@ -32,15 +33,11 @@
                                 slot-descriptions))
          (slot-names (iter (for slot in slot-descriptions)
                        (collect (ensure-car slot))))
-         (inflate (make-hash-table :test 'eq))
+         (inflate-options nil)
          (accessors '()))
     (destructuring-bind (name &rest options) (ensure-list name-and-options)
-      (multiple-value-bind (inflate-options rest-options)
-          (partition :inflate options :key #'car :test #'eq)
-        (iter (for (key columns fn) in inflate-options)
-          (iter (for column in (ensure-list columns))
-            (setf (gethash column inflate) fn)))
-        (setf options rest-options))
+      (multiple-value-setq (inflate-options options)
+          (partition :inflate options :key #'car :test #'eq))
       (let ((conc-name (or (cadr (find :conc-name options :key #'car :test #'eq))
                            (intern (format nil "~A-" name)))))
         `(progn
@@ -94,15 +91,14 @@
                                     (and (find-class ',(or model-class slot-name) nil)
                                          '(:as ,(or model-class slot-name)))))))))))
            ,@(progn (setf (gethash name *model-accessors*) accessors) nil)
+           ,@(when inflate-options
+               (iter outer (for (key columns fn) in (reverse inflate-options))
+                 (iter (for column in (ensure-list columns))
+                    (in outer (collect `(add-inflate-table ',name ',column ,fn))))))
            (defstruct (,name
                        (:constructor ,(intern (format nil "~A~A"
                                                       (string :make-) name))
-                           (&key ,@slot-names
-                            &allow-other-keys
-                              ,@(and (not (zerop (hash-table-count inflate)))
-                                 `(&aux
-                                     ,@(iter (for (column fn) in-hashtable inflate)
-                                         (collect `(,column (funcall ,fn ,column))))))))
+                           (&key ,@slot-names &allow-other-keys))
                        ,@options)
              ,@(when doc (list doc))
              ,@slot-descriptions))))))

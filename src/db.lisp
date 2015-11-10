@@ -63,6 +63,28 @@
     (dbi:disconnect *connection*)
     (setf *connection* nil)))
 
+@export
+(defun inflate-table-exists-p (name)
+  (check-type name symbol)
+  (and (get name 'inflate)
+       t))
+
+@export
+(defun add-inflate-table (name column fn)
+  (check-type name symbol)
+  (check-type column symbol)
+  (check-type fn function)
+  (symbol-macrolet ((table (get name 'inflate)))
+    (when (null table)
+      (setf table (make-hash-table :test 'eq)))
+    (setf (gethash column table) fn)))
+
+@export
+(defun inflate-table (name)
+  (check-type name symbol)
+  (iter (for (column fn) in-hashtable (get name 'inflate))
+        (collect (list column fn))))
+
 (defun connection-quote-character (conn)
   (case (connection-driver-type conn)
     (:mysql #\`)
@@ -110,6 +132,11 @@
                 (row (iter (for (column value) on row by #'cddr)
                        (collect (prettify-column-name column))
                        (collect (convert-column-value value)))))
+           ;; Apply inflation.
+           (when (inflate-table-exists-p as)
+             (iter (for (column fn) in (inflate-table as))
+                   (for column1 = (prettify-column-name column))
+                   (setf (getf row column1) (funcall fn (getf row column1)))))
            (apply (symbol-function constructor) row)))))))
 
 (defun get-prev-stack ()
